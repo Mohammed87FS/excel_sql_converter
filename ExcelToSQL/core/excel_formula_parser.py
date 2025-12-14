@@ -92,11 +92,85 @@ class ExcelFormulaTokenizer:
     
     # Placeholder for now 
     def _match_number(self) -> Optional[Token]:
-        return None   
+
+        # pattern 
+        # \d+\.?\d*  → 123, 123.45, 123.
+        # \.\d+      → .5, .123
+        # Both can be followed by [eE][+-]?\d+ for scientific notation
+        pattern = r'(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?'
+        match = re.match(pattern, self.formula[self.position:])
+        
+        if not match:
+            return None
+        
+        start_pos = self.position
+        number_str = match.group(0)
+        self.position += len(number_str)
+        
+        # checking for percentage sign
+        is_percent = False
+        if self.position < self.length and self.formula[self.position] == '%':
+            is_percent = True
+            self.position += 1
+        
+        # i convert to float
+        try:
+            value = float(number_str)
+            if is_percent:
+                value = value / 100
+            
+            return Token(TokenType.NUMBER, value, start_pos)
+        
+        except ValueError:
+            # should not really happen with my regex, but safety first
+            self.position = start_pos  # reset pos
+            return None
+        
+
     def _match_string(self) -> Optional[Token]:
-        return None   
+        if self.position >= self.length or self.formula[self.position] != '"':
+            return None
+        
+        start_pos = self.position
+        self.position += 1  
+        value = ""
+        while self.position < self.length:
+            char = self.formula[self.position]
+            if char == '"':
+                if self.position + 1 < self.length and self.formula[self.position + 1] == '"':
+                    value += '"'
+                    self.position += 2 
+                else:
+                    self.position += 1 
+                    return Token(TokenType.STRING, value, start_pos)
+            else:
+                value += char
+                self.position += 1
+        
+        return Token(TokenType.STRING, value, start_pos)
+    
     def _match_cell_ref(self) -> Optional[Token]:
-        return None       
+        """
+        match cell references like .. A1, B2, $A$1, $B2, A$1, XFD1048576
+        supports absolute references with $ signs
+        erxcel columns.. A-Z, AA-ZZ, AAA-XFD (max)
+        excel rows.. 1-1048576 (max)
+        """
+        # Pattern.. optional$, letters, optional$, digits
+        # \$?      → optional $ before column
+        # [A-Z]+   → one or more letters (column)
+        # \$?      → optional $ before row
+        # \d+      → one or more digits (row)
+        pattern = r'\$?[A-Z]+\$?\d+'
+        match = re.match(pattern, self.formula[self.position:], re.IGNORECASE)
+        if not match:
+            return None
+        start_pos = self.position
+        cell_ref = match.group(0).upper() 
+        self.position += len(match.group(0))
+        return Token(TokenType.CELL_REF, cell_ref, start_pos)    
+
+
     def _match_range_ref(self) -> Optional[Token]:
         return None   
     def _match_table_ref(self) -> Optional[Token]:
